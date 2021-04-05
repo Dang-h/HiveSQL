@@ -1,7 +1,7 @@
 # HiveSQL
 HiveSQL入门，了解一下？😉
 
-## [HQL小练习](https://github.com/Dang-h/movieETL)
+## [HQL小练习](https://github.com/Dang-h/BigData/blob/master/Hive/Hive.md)
 
 ## HQL小知识
 
