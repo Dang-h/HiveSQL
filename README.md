@@ -1,6 +1,10 @@
 # HiveSQL
 HiveSQL入门，了解一下？😉
 
+## [HQL小练习](https://github.com/Dang-h/movieETL)
+
+## HQL小知识
+
 ```sql
 -- 一些设置
 -- 以本地模式运行
