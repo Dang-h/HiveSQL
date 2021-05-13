@@ -1,36 +1,244 @@
 # HiveSQL
+
 HiveSQL入门，了解一下？😉
 
-## [HQL小练习](https://github.com/Dang-h/BigData/blob/master/Hive/Hive.md)
+---
+
+- [HQL小练习](https://github.com/Dang-h/BigData/blob/master/Hive/Hive.md)
+- [一些设置](#一些设置)
+    - [Hive显示中文备注](#Hive显示中文备注)
+    - [Hive优化](#Hive优化)
+        - [设置reduce个数](#设置reduce个数)
+        - [设置Map数](#设置Map数)
+        - [合并小文件](#合并小文件)
+        - [压缩](#压缩)
+        - [向量优化器](#向量优化器)
+        - [cbo优化器](#优化器)
+        - [本地运行模式](#本地运行模式)
+        - [并行执行](#并行执行)
+        - [jvm重用](#重用)
+        - [map、reduce内存](#内存)
+        - [推测执行](#推测执行)
+        - [数据倾斜](#数据倾斜)
+- [查看一些信息](#查看一些信息)
+- [DDL](#DDL)
+- [DML](#DML)
+- [查询小练习](#查询小练习)
+    - [计算emp表每个部门的平均工资](#计算emp表每个部门的平均工资)
+    - [计算emp每个部门中每个岗位的最高薪水](#计算emp每个部门中每个岗位的最高薪水)
+    - [查看一个部门有哪些职位,及部门最高薪资](#查看一个部门有哪些职位,及部门最高薪资)
+    - [求每个部门的平均薪水大于2000的部门](#求每个部门的平均薪水大于2000的部门)
+    - [求出不同部门男女各多少人](#求出不同部门男女各多少人)
+    - [把星座和血型一样的人归类到一起](#把星座和血型一样的人归类到一起)
+    - [分类合并](#分类合并)
+    - [查询在2017年4月份购买过的顾客及总人数](#查询在2017年4月份购买过的顾客及总人数)
+    - [查询顾客的购买明细及月购买总额](#查询顾客的购买明细及月购买总额)
+    - [上述的场景, 将每个顾客的cost按照日期进行累加](#将每个顾客的cost按照日期进行累加)
+    - [查询每个顾客上次的购买时间](#查询每个顾客上次的购买时间)
+    - [查询前20%时间的订单信息](#查询前20%时间的订单信息)
+    - [计算3日留存率](#计算3日留存率)
+- [join](#join)
+    - [内连接](#内连接)
+    - [左外连接](#左外连接)
+    - [满外连接](#满外连接)
+- [排序](#排序)
+    - [分区排序](#分区排序（Distribute By）)
+- [分桶及抽样查询](#分桶及抽样查询)
+- [常用函数](#常用函数)
+    - [窗口函数](#窗口函数)
+    - [解析json数组](src/main/java/udtf/ExplodeJsonArray.java)
+
+---
 
 ## HQL小知识
 
+## 一些设置
+
+### Hive显示中文备注
+
+    更改MySQL中的Hive源数据库
+
 ```sql
--- 一些设置
--- 以本地模式运行
-/*
- 当一个job满足如下条件才能真正使用本地模式：
- 1.job的输入数据大小必须小于参数：hive.exec.mode.local.auto.inputbytes.max(默认128MB)
- 2.job的map数必须小于参数：hive.exec.mode.local.auto.tasks.max(默认4)
- 3.job的reduce数必须为0或者1
- */
-SET hive.exec.mode.local.auto=true;
+ALTER TABLE COLUMNS_V2
+    MODIFY COLUMN COMMENT VARCHAR(256) CHARACTER SET utf8;
+ALTER TABLE TABLE_PARAMS
+    MODIFY COLUMN PARAM_VALUE VARCHAR(4000) CHARACTER SET utf8;
+ALTER TABLE PARTITION_PARAMS
+    MODIFY COLUMN PARAM_VALUE VARCHAR(4000) CHARACTER SET utf8;
+ALTER TABLE PARTITION_KEYS
+    MODIFY COLUMN PKEY_COMMENT VARCHAR(4000) CHARACTER SET utf8;
+ALTER TABLE INDEX_PARAMS
+    MODIFY COLUMN PARAM_VALUE VARCHAR(4000) CHARACTER SET utf8;
+```
+
+### Hive优化
+
+[Hive参数说明](https://cwiki.apache.org/confluence/display/Hive/Configuration+Properties)
+
+#### 设置reduce个数
+
+    SET mapred.reduce.tasks; -- 每个作业自动选择reduce个数（-1）,新版参数名:mapreduce.job.reduces; --每个spark shuffle阶段的reduce数量
+    SET hive.exec.reducers.bytes.per.reducer; -- 每个reducer处理的数据量（256MB）
+    SET hive.exec.reducers.max; -- 每个任务可开启的最大reduce数
+
+#### 设置Map数
+
+    SET mapred.max.split.size; -- 单个map最大数据处理量（256MB）,新版:mapreduce.input.fileinputformat.split.maxsize
+    SET mapred.min.split.size.per.node; -- 单个节点可处理的最小数据量（1B）,新版:mapreduce.input.fileinputformat.split.minsize.per.node
+    SET mapred.min.split.size.per.rack; -- 单个机架可处理的最小数据量（1B）,新版:mapreduce.input.fileinputformat.split.minsize.per.rack
+    SET hive.input.format; -- 使用小文件预聚合
+
+#### 合并小文件
+
+    SET hive.merge.mapfiles; -- 开启map端输出合并（true）
+    SET hive.merge.mapredfiles; -- reduce端输出合并(false)
+    SET hive.merge.size.per.task; -- 作业结束后合并文件的大小（256MB）
+    SET hive.merge.smallfiles.avgsize; -- 当启用reduce端输出小文件合并时，小于（160MB）将会启动单独线程进行小文件合并
+
+#### 压缩
+
+    SET io.compression.codecs;-- 查看支持的压缩格式
+    SET hive.exec.compress.output; -- 查看输出是否启用压缩
+    SET mapreduce.output.fileoutputformat.compress.codec; -- 查看输出结果使用的压缩算法
+
+#### 向量优化器
+
+    SET hive.vectorized.execution.enabled; -- 向量化优化器
+    SET hive.vectorized.execution.reduce.enabled;
+
+#### 优化器
+
+    SET hive.cbo.enable; --(true)
+    SET hive.compute.query.using.stats; -- max,min,count(1)从元数据获取(true)
+    SET hive.fetch.task.conversion; -- fetch抓取模式(more)-“more”可以接受SELECT子句中的任何类型的表达式，包括udf。
+    SET hive.stats.fetch.column.stats; -- 列信息从元数据获取(false)
+    SET hive.stats.fetch.partition.stats; -- 开启fetch抓取，快速获取行数等信息(true)
+
+#### 本地运行模式
+
+    SET hive.exec.mode.local.auto; -- 本地模式运行
+    SET hive.exec.mode.local.auto.inputbytes.max; -- 输入数据小于128M启用本地模式
+    SET hive.exec.mode.local.auto.input.files.max; -- map数小于这个值就启动本地模式
+
+#### 并行执行
+
+    SET hive.exec.parallel; -- 如果是spark引擎，开始并行执行会影响效率
+    SET hive.exec.parallel.thread.number; -- 并行执行线程数
+
+#### 重用
+
+    SET mapreduce.job.jvm.numtasks; -- 每个jvm可运行得任务数，默认为1
+    SET mapreduce.job.ubertask.enable;
+    SET mapreduce.job.ubertask.maxmaps;
+
+#### 内存
+
+    SET mapreduce.map.memory.mb; -- map可用内存
+    SET mapreduce.reduce.memory.mb; -- reduce可用内存
+    SET mapreduce.job.queuename; -- 任务执行的队列
+
+#### 推测执行
+
+    SET hive.mapred.reduce.tasks.speculative.execution; -- 开启推测执行（true）
+    SET mapred.map.tasks.speculative.execution; -- 来时map端预测执行， 新版:set mapreduce.map.speculative;(true)
+    SET mapred.reduce.tasks.speculative.execution;
+
+#### 数据倾斜
+
+    SET hive.optimize.skewjoin; -- 是否开启数据倾斜优化(false)
+    set hive.optimize.skewjoin.compiletime; -- 是否创建一个单独的嘉华来处理key的数据倾斜(false)
+
+```sql
+-- 创建永久函数并与Java.class关联
+CREATE FUNCTION explode_json_array AS
+    'custom.hive.udtf.ExplodeJSONArray' USING jar
+    'hdfs://hadoop102:8020/user/hive/jars/hivefunction-1.0- SNAPSHOT.jar';
+```
+
+## 查看一些信息
+
+```sql
 -- 查看内置函数
 SHOW FUNCTIONS;
+
 -- 查看month相关的函数
-SHOW FUNCTIONS LIKE '*month*'
+SHOW FUNCTIONS LIKE '*month*';
+
 -- 查看函数用法
 DESC FUNCTION function_name;
+
 -- 查看 add_months 函数的详细说明并举例
 DESC FUNCTION EXTENDED add_months;
+
 -- 查看分区
-SHOW PARTITIONS table_name;
+SHOW PARTITIONS TABLE_NAME;
 
--- 创建数据库,数据库在HDFS上的默认存储路径是/user/hive/warehouse/*.db。
-CREATE DATABASE IF NOT EXISTS db_hive;
+-- 查看表的结构
+DESC FORMATTED student;
 
--- 指定HDFS上存放位置
-CREATE DATABASE IF NOT EXISTS db_hive2 LOCATION '/db_hive2.db';
+/*
++-------------------------------+-------------------------------------------------------------+-----------------------+--+
+|           col_name            |                          data_type                          |        comment        |
++-------------------------------+-------------------------------------------------------------+-----------------------+--+
+| # col_name                    | data_type                                                   | comment               |
+|                               | NULL                                                        | NULL                  |
+| id                            | int                                                         |                       |
+| name                          | string                                                      |                       |
+|                               | NULL                                                        | NULL                  |
+| # Detailed Table Information  | NULL                                                        | NULL                  |
+| Database:                     | db_hive                                                     | NULL                  |
+| Owner:                        | hadoop                                                     | NULL                  |
+| CreateTime:                   | Mon Jun 03 20:32:50 CST 2019                                | NULL                  |
+| LastAccessTime:               | UNKNOWN                                                     | NULL                  |
+| Protect Mode:                 | None                                                        | NULL                  |
+| Retention:                    | 0                                                           | NULL                  |
+| Location:                     | hdfs://hadoop101:9000/                                      | NULL                  |
+| Table Type:                   | MANAGED_TABLE                                               | NULL                  |
+| Table Parameters:             | NULL                                                        | NULL                  |
+|                               | COLUMN_STATS_ACCURATE                                       | true                  |
+|                               | numFiles                                                    | 0                     |
+|                               | numRows                                                     | 3                     |
+|                               | rawDataSize                                                 | 26                    |
+|                               | totalSize                                                   | 0                     |
+|                               | transient_lastDdlTime                                       | 1559653841            |
+|                               | NULL                                                        | NULL                  |
+| # Storage Information         | NULL                                                        | NULL                  |
+| SerDe Library:                | org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe          | NULL                  |
+| InputFormat:                  | org.apache.hadoop.mapred.TextInputFormat                    | NULL                  |
+| OutputFormat:                 | org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat  | NULL                  |
+| Compressed:                   | No                                                          | NULL                  |
+| Num Buckets:                  | -1                                                          | NULL                  |
+| Bucket Columns:               | []                                                          | NULL                  |
+| Sort Columns:                 | []                                                          | NULL                  |
+| Storage Desc Params:          | NULL                                                        | NULL                  |
+|                               | field.delim                                                 | \t                    |
+|                               | serialization.format                                        | \t                    |
++-------------------------------+-------------------------------------------------------------+-----------------------+--+
+*/
+
+-- 查看外部表结构
+DESC FORMATTED stu_external;
+
+/*
++-------------------------------+-------------------------------------------------------------+-----------------------+--+
+|           col_name            |                          data_type                          |        comment        |
++-------------------------------+-------------------------------------------------------------+-----------------------+--+
+
+| Table Type:                   | EXTERNAL_TABLE                                              | NULL                  |
+| Table Parameters:             | NULL                                                        | NULL                  |
+|                               | COLUMN_STATS_ACCURATE                                       | false                 |
+|                               | EXTERNAL                                                    | TRUE                  |
+|                               | numFiles                                                    | 0                     |
+|                               | numRows                                                     | -1                    |
+|                               | rawDataSize                                                 | -1                    |
+|                               | totalSize                                                   | 0                     |
+|                               | transient_lastDdlTime                                       | 1561725476            |
+
+| Storage Desc Params:          | NULL                                                        | NULL                  |
+|                               | field.delim                                                 | \t                    |
+|                               | serialization.format                                        | \t                    |
++-------------------------------+-------------------------------------------------------------+-----------------------+--+
+*/
 
 -- 过滤查询数据库
 SHOW DATABASES LIKE 'db_hive*';
@@ -41,55 +249,33 @@ DESC DATABASE db_hive;
 +----------+----------+-------------------------------------------------------+-------------+-------------+-------------+--+
 | db_name  | comment  |                       location                        | owner_name  | owner_type  | parameters  |
 +----------+----------+-------------------------------------------------------+-------------+-------------+-------------+--+
-| db_hive  |          | hdfs://hadoop101:9000/user/hive/warehouse/db_hive.db  | atguigu     | USER        |             |
+| db_hive  |          | hdfs://hadoop101:9000/user/hive/warehouse/db_hive.db  | hadoop     | USER        |             |
 +----------+----------+-------------------------------------------------------+-------------+-------------+-------------+--+
 */
 
 -- 显示数据库详细信息
 DESC DATABASE EXTENDED db_hive;
 /*
- +----------+----------+-------------------------------------------------------+-------------+-------------+--------------------------+--+
++----------+----------+-------------------------------------------------------+-------------+-------------+--------------------------+--+
 | db_name  | comment  |                       location                        | owner_name  | owner_type  |        parameters        |
 +----------+----------+-------------------------------------------------------+-------------+-------------+--------------------------+--+
-| db_hive  |          | hdfs://hadoop101:9000/user/hive/warehouse/db_hive.db  | atguigu     | USER        | {createtime=2019-06-03}  |
+| db_hive  |          | hdfs://hadoop101:9000/user/hive/warehouse/db_hive.db  | hadoop     | USER        | {createtime=2019-06-03}  |
 +----------+----------+-------------------------------------------------------+-------------+-------------+--------------------------+--+
+*/
+```
 
- */
+## DDL
 
---  修改数据库
-ALTER DATABASE db_hive SET DBPROPERTIES ('createtime' = '20190628');
-/*
- +----------+----------+-------------------------------------------------------+-------------+-------------+------------------------+--+
-| db_name  | comment  |                       location                        | owner_name  | owner_type  |       parameters       |
-+----------+----------+-------------------------------------------------------+-------------+-------------+------------------------+--+
-| db_hive  |          | hdfs://hadoop101:9000/user/hive/warehouse/db_hive.db  | atguigu     | USER        | {createtime=20190628}  |
-+----------+----------+-------------------------------------------------------+-------------+-------------+------------------------+--+
- */
+```sql
+-- 创建数据库,数据库在HDFS上的默认存储路径是/user/hive/warehouse/*.db。
+CREATE DATABASE IF NOT EXISTS db_hive;
 
-// 删除数据库
--- 删除空数据库
-DROP DATABASE db_hive2;
-
-DROP DATABASE IF EXISTS db_hive2;
-
--- 强制删除不为空数据库
-DROP DATABASE db_hive CASCADE;
-
--- 清空指定表中的数据
-TRUNCATE TABLE stu_buck;
-
--- 常用日期函数
-// 1 date_formate
-// 2 date_add
-// 3 next_add
-// 4 next_day
-// 5 last_day
-// 6 date_sub
-
+-- 创建数据库,指定HDFS上存放位置
+CREATE DATABASE IF NOT EXISTS db_hive2 LOCATION '/db_hive2.db';
 
 -- 创建表
 CREATE
-[EXTERNAL] TABLE [IF NOT EXISTS] table_name
+[EXTERNAL] TABLE [IF NOT EXISTS] TABLE_NAME
 (
     clo_name col_type [COMMENT col_comment],
     col_name2 col_tyoe2 [COMMENT col_comment2]
@@ -97,7 +283,7 @@ CREATE
     [PARTITIONED BY (col_name data_type [COMMENT col_comment])]
     [CLUSTERED BY (col_name, col_name1)]
     [SORTED BY (col_name [ASC|DESC], col_name) INTO num_buckets BUCKETS]
-    [ROW FORMAT row_format]
+    [ROW FORMAT ROW_FORMAT]
     [STORED AS file_format]
     [LOCATION hdfs_path]
     [TBLPROPERTIES (property_name=property_value, property_name1=property_value1)]
@@ -132,16 +318,16 @@ CREATE
 -- 创建普通表
 CREATE TABLE IF NOT EXISTS user_info
 (
-    uid  int,
-    name string,
-    age  int
+    uid int,
+    name STRING,
+    age int
 ) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'
     STORED AS TEXTFILE
     LOCATION '/user/hive/warehouse/user_info';
 CREATE TABLE IF NOT EXISTS house_info
 (
-    houseId string,
-    uid     int
+    houseId STRING,
+    uid int
 ) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'
     STORED AS TEXTFILE
     LOCATION '/user/hive/warehouse/house_info';
@@ -155,106 +341,17 @@ FROM student;
 -- 根据已存在的表结构创建表
 CREATE TABLE IF NOT EXISTS student3 LIKE student;
 
--- 查询表的结构
-DESC FORMATTED student;
-
-/*
-+-------------------------------+-------------------------------------------------------------+-----------------------+--+
-|           col_name            |                          data_type                          |        comment        |
-+-------------------------------+-------------------------------------------------------------+-----------------------+--+
-| # col_name                    | data_type                                                   | comment               |
-|                               | NULL                                                        | NULL                  |
-| id                            | int                                                         |                       |
-| name                          | string                                                      |                       |
-|                               | NULL                                                        | NULL                  |
-| # Detailed Table Information  | NULL                                                        | NULL                  |
-| Database:                     | db_hive                                                     | NULL                  |
-| Owner:                        | atguigu                                                     | NULL                  |
-| CreateTime:                   | Mon Jun 03 20:32:50 CST 2019                                | NULL                  |
-| LastAccessTime:               | UNKNOWN                                                     | NULL                  |
-| Protect Mode:                 | None                                                        | NULL                  |
-| Retention:                    | 0                                                           | NULL                  |
-| Location:                     | hdfs://hadoop101:9000/                                      | NULL                  |
-| Table Type:                   | MANAGED_TABLE                                               | NULL                  |
-| Table Parameters:             | NULL                                                        | NULL                  |
-|                               | COLUMN_STATS_ACCURATE                                       | true                  |
-|                               | numFiles                                                    | 0                     |
-|                               | numRows                                                     | 3                     |
-|                               | rawDataSize                                                 | 26                    |
-|                               | totalSize                                                   | 0                     |
-|                               | transient_lastDdlTime                                       | 1559653841            |
-|                               | NULL                                                        | NULL                  |
-| # Storage Information         | NULL                                                        | NULL                  |
-| SerDe Library:                | org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe          | NULL                  |
-| InputFormat:                  | org.apache.hadoop.mapred.TextInputFormat                    | NULL                  |
-| OutputFormat:                 | org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat  | NULL                  |
-| Compressed:                   | No                                                          | NULL                  |
-| Num Buckets:                  | -1                                                          | NULL                  |
-| Bucket Columns:               | []                                                          | NULL                  |
-| Sort Columns:                 | []                                                          | NULL                  |
-| Storage Desc Params:          | NULL                                                        | NULL                  |
-|                               | field.delim                                                 | \t                    |
-|                               | serialization.format                                        | \t                    |
-+-------------------------------+-------------------------------------------------------------+-----------------------+--+
- */
 
 --  创建外部表
-CREATE EXTERNAL TABLE stu_external
+CREATE
+EXTERNAL TABLE stu_external
 (
-    id   int,
-    name string
+    id   INT,
+    NAME STRING
 )
     ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'
     LOCATION '/student';
 
--- 查看表结构
-DESC FORMATTED stu_external;
-/*
-+-------------------------------+-------------------------------------------------------------+-----------------------+--+
-|           col_name            |                          data_type                          |        comment        |
-+-------------------------------+-------------------------------------------------------------+-----------------------+--+
-| # col_name                    | data_type                                                   | comment               |
-|                               | NULL                                                        | NULL                  |
-| id                            | int                                                         |                       |
-| name                          | string                                                      |                       |
-|                               | NULL                                                        | NULL                  |
-| # Detailed Table Information  | NULL                                                        | NULL                  |
-| Database:                     | db_hive                                                     | NULL                  |
-| Owner:                        | atguigu                                                     | NULL                  |
-| CreateTime:                   | Fri Jun 28 20:37:56 CST 2019                                | NULL                  |
-| LastAccessTime:               | UNKNOWN                                                     | NULL                  |
-| Protect Mode:                 | None                                                        | NULL                  |
-| Retention:                    | 0                                                           | NULL                  |
-| Location:                     | hdfs://hadoop101:9000/student                               | NULL                  |
-| Table Type:                   | EXTERNAL_TABLE                                              | NULL                  |
-| Table Parameters:             | NULL                                                        | NULL                  |
-|                               | COLUMN_STATS_ACCURATE                                       | false                 |
-|                               | EXTERNAL                                                    | TRUE                  |
-|                               | numFiles                                                    | 0                     |
-|                               | numRows                                                     | -1                    |
-|                               | rawDataSize                                                 | -1                    |
-|                               | totalSize                                                   | 0                     |
-|                               | transient_lastDdlTime                                       | 1561725476            |
-|                               | NULL                                                        | NULL                  |
-| # Storage Information         | NULL                                                        | NULL                  |
-| SerDe Library:                | org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe          | NULL                  |
-| InputFormat:                  | org.apache.hadoop.mapred.TextInputFormat                    | NULL                  |
-| OutputFormat:                 | org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat  | NULL                  |
-| Compressed:                   | No                                                          | NULL                  |
-| Num Buckets:                  | -1                                                          | NULL                  |
-| Bucket Columns:               | []                                                          | NULL                  |
-| Sort Columns:                 | []                                                          | NULL                  |
-| Storage Desc Params:          | NULL                                                        | NULL                  |
-|                               | field.delim                                                 | \t                    |
-|                               | serialization.format                                        | \t                    |
-+-------------------------------+-------------------------------------------------------------+-----------------------+--+
- */
-
-
--- 修改表为外部表
-ALTER TABLE student
-    SET TBLPROPERTIES ('EXTERNAL' = 'TRUE');
--- 注意：('EXTERNAL'='TRUE')和('EXTERNAL'='FALSE')为固定写法，区分大小写！
 
 -- 表结构
 /*
@@ -271,11 +368,13 @@ ALTER TABLE student
 CREATE TABLE dept_partition
 (
     deptno int,
-    dname  string,
-    loc    string
-) PARTITIONED BY (month string)
+    dname STRING,
+    loc STRING
+) PARTITIONED BY (MONTH STRING)
     ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
+
 -- 查看分区表结构
+
 /*
 +-------------------------------+----------------------------------------------------------------------+-----------------------+--+
 |           col_name            |                              data_type                               |        comment        |
@@ -291,50 +390,67 @@ CREATE TABLE dept_partition
 |                               | NULL                                                                 | NULL                  |
 | month                         | string                                                               |                       |
  */
--- 加载数据到分区
-LOAD DATA LOCAL INPATH '/opt/module/datas/dept.txt' INTO TABLE dept_partition PARTITION (month = '201906');
-LOAD DATA LOCAL INPATH '/opt/module/datas/dept.txt' INTO TABLE dept_partition PARTITION (month = '201905');
-LOAD DATA LOCAL INPATH '/opt/module/datas/dept.txt' INTO TABLE dept_partition PARTITION (month = '201904');
-LOAD DATA LOCAL INPATH '/opt/module/datas/dept.txt' INTO TABLE dept_partition PARTITION (month = '201903');
 
--- 查询分区表数据
-SELECT *
-FROM dept_partition
-WHERE month = '201903';
+-- 数据导入
+LOAD DATA [LOCAL] INPATH '/data/hive/student.txt' [OVERWRITE] INTO TABLE student [PARTITION (partCol1=cal1,...)]
 /*
-+------------------------+-----------------------+---------------------+-----------------------+--+
-| dept_partition.deptno  | dept_partition.dname  | dept_partition.loc  | dept_partition.month  |
-+------------------------+-----------------------+---------------------+-----------------------+--+
-| 10                     | ACCOUNTING            | 1700                | 201903                |
-| 20                     | RESEARCH              | 1800                | 201903                |
-| 30                     | SALES                 | 1900                | 201903                |
-| 40                     | OPERATIONS            | 1700                | 201903                |
-+------------------------+-----------------------+---------------------+-----------------------+--+
- */
+（1）load data:表示加载数据
+（2）local:表示从本地加载数据到hive表(从本地复制上传)；否则从HDFS加载数据到hive表（在HDFS中移动）
+（3）inpath:表示加载数据的路径
+（4）overwrite:表示覆盖表中已有数据，否则表示追加
+（5）into table:表示加载到哪张表
+（6）student:表示具体的表
+（7）partition:表示上传到指定分区
+*/
+
+-- 加载数据到分区
+LOAD DATA LOCAL INPATH '/opt/module/datas/dept.txt' INTO TABLE dept_partition PARTITION (MONTH = '201906');
+LOAD DATA LOCAL INPATH '/opt/module/datas/dept.txt' INTO TABLE dept_partition PARTITION (MONTH = '201905');
+
+--  创建二级分区表
+CREATE TABLE dept_partition2
+(
+    deptno int,
+    dname STRING,
+    loc STRING
+) PARTITIONED BY (MONTH STRING, DAY STRING) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
+
+-- 加载数据到二级分区表
+LOAD DATA LOCAL INPATH '/data/hive/dept.txt' INTO TABLE dept_partition2 PARTITION (MONTH = '201906', DAY = '30');
+
+
 --  分区表小例子
 // 建表
 CREATE TABLE t_visit_video
 (
-    username   string,
-    video_name string
-) PARTITIONED BY (day string)
-    ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+    username STRING,
+    video_name STRING
+) PARTITIONED BY (DAY STRING)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
 // 导入数据
-LOAD DATA LOCAL INPATH '/test/collect_set_test.txt' INTO TABLE t_visit_video PARTITION (day = '2019-07-10');
-/*
- 数据：
-张三,大唐双龙传
-李四,天下无贼
-张三,神探狄仁杰
-李四,霸王别姬
-李四,霸王别姬
-王五,机器人总动员
-王五,放牛班的春天
-王五,盗梦空间
- */
+LOAD DATA LOCAL INPATH '/test/collect_set_test.txt' INTO TABLE t_visit_video PARTITION (DAY = '2019-07-10');
+
+--  通过查询语句向表中插数据
+INSERT INTO TABLE student
+SELECT clo1, col2, col3
+FROM table_name;
+
+-- 创建一张分区表
+CREATE TABLE student
+(
+    id int,
+    name STRING
+) PARTITIONED BY (MONTH STRING) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
+-- 插入数据
+INSERT INTO TABLE student PARTITION (MONTH = '201906')
+VALUES (1, 'zhangsan'),
+    (2, '王五');
+
 // 查看
 SELECT *
 FROM t_visit_video;
+
 /*
 +-------------------------+---------------------------+--------------------+--+
 | t_visit_video.username  | t_visit_video.video_name  | t_visit_video.day  |
@@ -349,6 +465,105 @@ FROM t_visit_video;
 | 王五                      | 盗梦空间                 | 2019-07-10         |
 +-------------------------+---------------------------+--------------------+--+
 */
+
+
+--  修改数据库
+ALTER DATABASE db_hive SET DBPROPERTIES ('createtime' = '20190628');
+
+/*
++----------+----------+-------------------------------------------------------+-------------+-------------+------------------------+--+
+| db_name  | comment  |                       location                        | owner_name  | owner_type  |       parameters       |
++----------+----------+-------------------------------------------------------+-------------+-------------+------------------------+--+
+| db_hive  |          | hdfs://hadoop101:9000/user/hive/warehouse/db_hive.db  | atguigu     | USER        | {createtime=20190628}  |
++----------+----------+-------------------------------------------------------+-------------+-------------+------------------------+--+
+*/
+
+-- 修改表为外部表
+ALTER TABLE student
+SET TBLPROPERTIES('EXTERNAL' = 'TRUE');
+-- 注意：('EXTERNAL'='TRUE')和('EXTERNAL'='FALSE')为固定写法，区分大小写！
+
+-- 重命名表
+ALTER TABLE table_name
+    RENAME TO new_table_name;
+
+-- 更改列类型
+ALTER TABLE student_new
+REPLACE COLUMNS (id STRING, name STRING, score INT);
+
+ALTER TABLE student
+REPLACE COLUMNS (id STRING);
+
+-- 更改列名
+ALTER TABLE student_new
+    CHANGE id ids STRING;
+
+-- 添加列
+ALTER TABLE student_new
+    ADD COLUMNS (score INT);
+
+
+-- 增加/修改/替换列信息
+-- 更新列
+ALTER TABLE table_name
+    CHANGE [COLUMN] col_old_name col_new_name column_tyoe [COMMENT col_comment];
+-- 增加和替换列
+ALTER TABLE table_name
+    ADD | REPLACE COLUMS (col_name data_type);
+
+-- 示例
+ALTER TABLE dept_partition
+    ADD COLUMNS (deptdesc STRING);
+
+-- 将列deptdesc改名为desc
+ALTER TABLE dept_partition
+    CHANGE COLUMN deptdesc desc STRING;
+
+-- 更改字段类型，change后字段名称写两遍
+ALTER TABLE dept_partition2
+    CHANGE deptno deptno STRING;
+
+--  增加分区
+ALTER TABLE dept_partition
+    ADD PARTITION (MONTH = '201907');
+
+-- 删除分区
+ALTER TABLE dept_partition
+    DROP PARTITION (MONTH = '201906');
+
+-- 查看分区数
+SHOW PARTITIONS dept_partition;
+
+// 删除数据库
+-- 删除空数据库
+DROP DATABASE db_hive2;
+
+DROP DATABASE IF EXISTS db_hive2;
+
+-- 强制删除不为空数据库
+DROP DATABASE db_hive CASCADE;
+
+-- 清空指定表中的数据
+TRUNCATE TABLE stu_buck;
+```
+
+## DML
+
+```sql
+-- 查询分区表数据
+SELECT *
+FROM dept_partition
+WHERE month = '201903';
+/*
++------------------------+-----------------------+---------------------+-----------------------+--+
+| dept_partition.deptno  | dept_partition.dname  | dept_partition.loc  | dept_partition.month  |
++------------------------+-----------------------+---------------------+-----------------------+--+
+| 10                     | ACCOUNTING            | 1700                | 201903                |
+| 20                     | RESEARCH              | 1800                | 201903                |
+| 30                     | SALES                 | 1900                | 201903                |
+| 40                     | OPERATIONS            | 1700                | 201903                |
++------------------------+-----------------------+---------------------+-----------------------+--+
+ */
 
 -- 多表联合查询
 SELECT *
@@ -372,115 +587,31 @@ WHERE month = '201905';
 |40	         | OPERATIONS| 1700	   | 201905    |
 +------------+-----------+---------+-----------+
  */
---  增加分区
-ALTER TABLE dept_partition
-    ADD PARTITION (month = '201907');
--- 删除分区
-ALTER TABLE dept_partition
-    DROP PARTITION (month = '201906');
--- 查看分区数
-SHOW PARTITIONS dept_partition;
-/*
-+---------------+--+
-|   partition   |
-+---------------+--+
-| month=201709  |
-| month=201903  |
-| month=201904  |
-| month=201905  |
-| month=201906  |
-+---------------+--+
- */
+```
 
---  创建二级分区表
-CREATE TABLE dept_partition2
-(
-    deptno int,
-    dname  string,
-    loc    string
-)
-    PARTITIONED BY (month string, day string) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
+## 查询小练习
 
--- 加载数据到二级分区表
-LOAD DATA LOCAL INPATH '/data/hive/dept.txt' INTO TABLE dept_partition2 PARTITION (month = '201906', day = '30');
+```sql
 
--- 修改表
--- 重命名表
-ALTER TABLE table_name
-    RENAME TO new_table_name;
-
-
--- 增加/修改/替换列信息
--- 更新列
-ALTER TABLE table_name
-    CHANGE [COLUMN] col_old_name col_new_name column_tyoe [COMMENT col_comment];
--- 增加和替换列
-ALTER TABLE table_name
-    ADD | REPLACE COLUMS (col_name data_type);
-
--- 示例
-ALTER TABLE dept_partition
-    ADD COLUMNS (deptdesc string);
-
--- 将列deptdesc改名为desc
-ALTER TABLE dept_partition
-    CHANGE COLUMN deptdesc desc string;
-
--- 更改字段类型，change后字段名称写两遍
-ALTER TABLE dept_partition2
-    CHANGE deptno deptno string;
-
-
--- 数据导入
-LOAD DATA [LOCAL] INPATH '/data/hive/student.txt' [OVERWRITE] INTO TABLE student [PARTITION (partCol1=cal1,...)]
-/*
-（1）load data:表示加载数据
-（2）local:表示从本地加载数据到hive表(从本地复制上传)；否则从HDFS加载数据到hive表（在HDFS中移动）
-（3）inpath:表示加载数据的路径
-（4）overwrite:表示覆盖表中已有数据，否则表示追加
-（5）into table:表示加载到哪张表
-（6）student:表示具体的表
-（7）partition:表示上传到指定分区
- */
-
---  通过查询语句向表中插数据
-INSERT INTO TABLE student
-SELECT clo1, col2, col3
-FROM table_name;
-
--- 创建一张分区表
-CREATE TABLE student
-(
-    id   int,
-    name string
-) PARTITIONED BY (month string) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
--- 插入数据
-INSERT INTO TABLE student PARTITION (month = '201906')
-VALUES (1, 'zhangsan'),
-       (2, '王五');
-
-
--- 查询小练习
 -- 创建部门表
 CREATE TABLE IF NOT EXISTS dept
 (
     deptno int,
-    dname  string,
-    loc    string
+    dname STRING,
+    loc STRING
 ) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
 -- 创建员工表
 CREATE TABLE IF NOT EXISTS emp
 (
-    empno    int,
-    ename    string,
-    job      string,
-    mgr      int,
-    hiredate string,
-    sal      double,
-    comm     double,
-    deptno   int
-)
-    ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
+    empno  int,
+    ename STRING,
+    job STRING,
+    mgr    int,
+    hiredate STRING,
+    sal    double,
+    comm   double,
+    deptno int
+) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
 -- 导入数据
 LOAD DATA LOCAL INPATH '/data/hive/dept.txt' INTO TABLE dept;
 LOAD DATA LOCAL INPATH '/data/hive/emp.txt' INTO TABLE emp;
@@ -526,8 +657,12 @@ FROM dept;
 +--------------+-------------+-----------+--+
 */
 
--- 计算emp表每个部门的平均工资
-SELECT e.deptno, avg(e.sal) AS avg_sal
+```
+
+### 计算emp表每个部门的平均工资
+
+```sql
+SELECT e.deptno, AVG(e.sal) AS avg_sal
 FROM emp e
 GROUP BY e.deptno;
 /*
@@ -539,8 +674,11 @@ GROUP BY e.deptno;
 | 30        | 1566.6666666666667  |
 +-----------+---------------------+--+
  */
+```
 
--- 计算emp每个部门中每个岗位的最高薪水
+### 计算emp每个部门中每个岗位的最高薪水
+
+```sql
 -- 1、每个部门，部门分组
 -- 2、每个岗位，岗位分组
 -- 2、最高薪水，选出部门中最高薪水
@@ -563,7 +701,7 @@ GROUP BY deptno, job;
 +---------+------------+--+
  */
 
-SELECT e.deptno, e.job, max(e.sal) AS max_sal
+SELECT e.deptno, e.job, MAX(e.sal) AS max_sal
 FROM emp e
 GROUP BY e.deptno, e.job;
 /*
@@ -581,9 +719,12 @@ GROUP BY e.deptno, e.job;
 | 30        | SALESMAN   | 1600.0   |
 +-----------+------------+----------+--+
  */
+```
 
--- 列转行，查看一个部门有哪些职位,及部门最高薪资
-SELECT e.deptno, concat_ws('|', collect_set(e.job)) dept_job, max(e.sal) max_sal
+### 查看一个部门有哪些职位,及部门最高薪资
+
+```sql
+SELECT e.deptno, CONCAT_WS('|', collect_set(e.job)) dept_job, MAX(e.sal) max_sal
 FROM emp e
 GROUP BY e.deptno;
 /*
@@ -601,15 +742,18 @@ GROUP BY e.deptno;
 （1）where后面不能写分组函数，而having后面可以使用分组函数。
 （2）having只用于group by分组统计语句。
  */
+```
 
--- 求每个部门的平均薪水大于2000的部门
+### 求每个部门的平均薪水大于2000的部门
+
+```sql
 /*
  1、求部门平均工资
  2、平均薪水>2000的部门
  */
 
 -- 1
-SELECT deptno, avg(sal) AS avg_sal
+SELECT deptno, AVG(sal) AS avg_sal
 FROM emp
 GROUP BY deptno;
 /*
@@ -623,7 +767,7 @@ GROUP BY deptno;
  */
 
 -- 2
-SELECT deptno, avg(sal) AS avg_sql
+SELECT deptno, AVG(sal) AS avg_sql
 FROM emp
 GROUP BY deptno
 HAVING avg_sql > 2000;
@@ -635,8 +779,11 @@ HAVING avg_sql > 2000;
 | 20      | 2175.0              |
 +---------+---------------------+--+
  */
+```
 
--- join
+## join
+
+```sql
 /*
  只支持等值连接，不支持非等值连接
  两个表m,n之间按照on条件连接，m中的一条记录和n中的一条记录组成一条新记录。
@@ -646,7 +793,7 @@ HAVING avg_sql > 2000;
  left semi join类似exists。即查找右表中的数据，是否在左表中存在，找出存在的数据。（左半连接）是 IN/EXISTS 子查询的一种更高效的实现。
  */
 
--- 根据员工表和部门表中的部门编号相等，查询员工编号、员工名称和部门名称
+### 根据员工表和部门表中的部门编号相等，查询员工编号、员工名称和部门名称
 /*
  1、部门编号相等
  2、查询员工编号（empno）、员工名称（empname）、本门名称（deptname）
@@ -680,8 +827,13 @@ FROM emp AS e
 | 7934   | MILLER  | ACCOUNTING  |
 +--------+---------+-------------+--+
  */
+```
 
---  内连接：只有进行连接的两个表中都存在与连接条件相匹配的数据才会被保留下来。
+### 内连接
+
+> 只有进行连接的两个表中都存在与连接条件相匹配的数据才会被保留下来。
+
+```sql
 SELECT e.empno AS empno, e.ename AS ename, d.deptno AS deptno
 FROM emp AS e
          JOIN dept AS d
@@ -706,8 +858,11 @@ FROM emp AS e
 | 7934   | MILLER  | 10      |
 +--------+---------+---------+--+
 */
+```
 
--- 左外连接
+### 左外连接
+
+```sql
 /*
  LEFT [OUTER] JOIN操作：左边表中的值无论是否在右表中存在，都输出；
                         右边表中的值，只有在左边表中存在才输出。左表中存在，右表中不存在的用null代替
@@ -769,12 +924,16 @@ FROM dept AS d
 | 40        | OPERATIONS  | NULL     | NULL     |
 +-----------+-------------+----------+----------+--+
 */
+```
 
--- 满外连接：返回所有表中符合WHERE语句条件的所有记录。如果任一表的指定字段没有符合条件的值的话，那么就使用NULL值替代。
+### 满外连接
+
+> 返回所有表中符合WHERE语句条件的所有记录。如果任一表的指定字段没有符合条件的值的话，那么就使用NULL值替代。
+
+```sql
 SELECT e.ename, e.empno, d.deptno, d.dname
-FROM emp AS e
-         FULL JOIN dept AS d
-                   ON e.deptno = d.deptno;
+FROM emp AS e FULL JOIN dept AS d
+ON e.deptno = d.deptno;
 /*
 +----------+----------+-----------+-------------+--+
 | e.ename  | e.empno  | d.deptno  |   d.dname   |
@@ -796,27 +955,34 @@ FROM emp AS e
 | NULL     | NULL     | 40        | OPERATIONS  |
 +----------+----------+-----------+-------------+--+
 */
+```
 
--- 排序
+## 排序
+
+```sql
 -- order by：全局排序，只有一个Reducer参与运算，会把所有数据加载到内存中进行排序
 -- Sort by：Reducern局部排序，为每个reducer产生一个排序文件。每个Reducer内部进行排序，对全局结果集来说不是排序。
 SELECT *
 FROM emp SORT BY deptno DESC;
+```
 
--- 分区排序（Distribute By）
+### 分区排序（Distribute By）
+
+```sql
 /*
  控制某个特定行应该到哪个reducer
  */
 --  设置reduce个数
-SET mapreduce.job.reduces=3;
+SET mapreduce.job.reduces = 3;
 -- 先按照部门编号分区，再按照员工编号降序排序。
 INSERT OVERWRITE LOCAL DIRECTORY '/opt/module/datas/distribute-result'
 SELECT *
 FROM emp DISTRIBUTE BY deptno SORT BY empno DESC;
+```
 
+## 分桶及抽样查询
 
-
--- 分桶及抽样查询
+```sql
 /*
  分区提供一个隔离数据和优化查询的便利方式，
  对于一张表或者分区，可进一步组织成桶，让其数据粒度更细
@@ -826,28 +992,28 @@ FROM emp DISTRIBUTE BY deptno SORT BY empno DESC;
 -- 创建分桶表，指定分2个桶
 CREATE TABLE stu_buck
 (
-    id   int,
-    name string
+    id int,
+    name STRING
 ) CLUSTERED BY (id) INTO 2 BUCKETS ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
 -- 创建普通表stu
 CREATE TABLE stu
 (
-    id   int,
-    name string
-)
-    ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
+    id int,
+    name STRING
+) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t';
 -- 向普通表stu导入数据
 LOAD DATA LOCAL INPATH '/data/hive/student.txt' INTO TABLE stu;
 -- 设置属性
-SET hive.enforce.bucketing=true;
-SET mapreduce.job.reduces=-1;
+SET hive.enforce.bucketing = TRUE;
+SET mapreduce.job.reduces = -1;
 -- 通过子查询的方式，导入数据到分桶表
 INSERT INTO TABLE stu_buck
 SELECT id, name
 FROM stu;
 -- 查询分桶的数据
 SELECT *
-FROM stu_buck TABLESAMPLE (BUCKET 1 OUT OF 2 ON id);
+FROM stu_buck TABLESAMPLE (BUCKET 1 OUT OF 2
+ON id);
 /*
 +--------------+----------------+--+
 | stu_buck.id  | stu_buck.name  |
@@ -862,9 +1028,13 @@ FROM stu_buck TABLESAMPLE (BUCKET 1 OUT OF 2 ON id);
 | 1008         | ss8            |
 +--------------+----------------+--+
 */
+```
 
+## 常用函数
 
--- 常用函数使用
+[常用函数使用](HiveSQL/常用函数.md)
+
+```sql
 -- NVL：给值为NULL 的数据赋值。格式：NVL( value，default_value)。default_value需要和字段类型相同
 -- 如果value 为NULL，返回default_value的值，否则返回value的值，如果两个参数都为NULL，则返回NULL。
 SELECT comm, nvl(comm, -1) null_comm
@@ -889,10 +1059,12 @@ FROM emp;
 | NULL    | -1.0       |
 +---------+------------+--+
 */
+```
 
+### 求出不同部门男女各多少人
 
+```sql
 -- case when 的使用
--- 求出不同部门男女各多少人
 /*
  结果如下：
   dept_id  | male_count  | female_count
@@ -902,15 +1074,14 @@ FROM emp;
 
 CREATE TABLE emp_sex
 (
-    name    string,
-    dept_id string,
-    sex     string
-)
-    ROW FORMAT DELIMITED FIELDS TERMINATED BY "\t";
+    name STRING,
+    dept_id STRING,
+    sex STRING
+) ROW FORMAT DELIMITED FIELDS TERMINATED BY "\t";
 
 SELECT dept_id,
-       sum(CASE sex WHEN '男' THEN 1 ELSE 0 END) male_count,
-       sum(CASE sex WHEN '女' THEN 1 ELSE 0 END) female_count
+       SUM(CASE sex WHEN '男' THEN 1 ELSE 0 END) male_count,
+       SUM(CASE sex WHEN '女' THEN 1 ELSE 0 END) female_count
 FROM emp_sex
 GROUP BY dept_id;
 /*
@@ -922,6 +1093,7 @@ GROUP BY dept_id;
 +----------+-------------+---------------+--+
 */
 
+
 -- 行转列
 /*
  相关函数：
@@ -929,7 +1101,11 @@ GROUP BY dept_id;
     CONCAT_WS(separator, [string | array(string)]+)：返回由分隔符分隔的字符串的连接
     COLLECT_SET(col)：返回一组消除了重复元素的对象
  */
--- 把星座和血型一样的人归类到一起
+ ```
+
+### 把星座和血型一样的人归类到一起
+
+```sql
 /*
  行转列
  列:
@@ -950,17 +1126,16 @@ GROUP BY dept_id;
 
 CREATE TABLE person_info
 (
-    name          string,
-    constellation string,
-    blood_type    string
-)
-    ROW FORMAT DELIMITED FIELDS TERMINATED BY "\t";
+    name STRING,
+    constellation STRING,
+    blood_type STRING
+) ROW FORMAT DELIMITED FIELDS TERMINATED BY "\t";
 
 -- 从结果"大海|凤姐" => 需要将多个字段用指定符号连接,函数concat_ws(separator, fields)
 -- 从整体结果"射手座,A 大海|凤姐" => 还需将前半段"射手座"和后半段"大海|凤姐"拼接,函数 CONCAT(string A/col, string B/col…)
 
 -- 1. 将星座和血型拼接
-SELECT name, concat(constellation, ",", blood_type) base
+SELECT name, CONCAT(constellation, ",", blood_type) base
 FROM person_info;
 /*
 +-------+--------+--+
@@ -975,8 +1150,8 @@ FROM person_info;
 */
 
 -- 2. 列转行
-SELECT t1.base, concat_ws('|', collect_set(t1.name)) name
-FROM (SELECT name, concat(constellation, ",", blood_type) base
+SELECT t1.base, CONCAT_WS('|', collect_set(t1.name)) name
+FROM (SELECT name, CONCAT(constellation, ",", blood_type) base
       FROM person_info) t1
 GROUP BY t1.base;
 /*
@@ -988,6 +1163,11 @@ GROUP BY t1.base;
 | 白羊座,B   | 宋宋           |
 +----------+----------+------+
 */
+```
+
+### 分类合并
+
+```sql
 -- collect_list/set再识
 /*
 +-------------------------+---------------------------+--------------------+--+
@@ -1058,7 +1238,6 @@ GROUP BY username;
 +-----------+---------+--+
 */
 
-
 -- 行转列
 /*EXPLODE(col):将hive一列中复杂的array或者map结构拆分成多行。
 explode() takes in an array (or a map) as an input and outputs the elements of the array (map) as separate rows.
@@ -1068,10 +1247,9 @@ UDTFs can be used in the SELECT expression list and as a part of LATERAL VIEW.
 -- 创建movie表
 CREATE TABLE movie_info
 (
-    movie    string,
-    category array<string>
-)
-    ROW FORMAT DELIMITED FIELDS TERMINATED BY "\t"
+    movie STRING,
+    category array< STRING >
+) ROW FORMAT DELIMITED FIELDS TERMINATED BY "\t"
 --         row format delimited fields terminated by "\t"  ==> 指定列分隔符
         COLLECTION ITEMS TERMINATED BY ",";
 --          collection items terminated by ","             ==> 指定map Stract 和 array 分隔符
@@ -1109,7 +1287,7 @@ FROM movie_info LATERAL VIEW explode(category) table_tmp AS category_name;
 | 《战狼2》     | 灾难             |
 +--------------+----------------+--+
 */
-SELECT category_name, concat_ws('|', collect_list(movie)) movie
+SELECT category_name, CONCAT_WS('|', collect_list(movie)) movie
 FROM movie_info LATERAL VIEW explode(category) table_tmp AS category_name
 GROUP BY category_name;
 /*
@@ -1127,35 +1305,38 @@ GROUP BY category_name;
 +----------------+-------------------------------------+--+
 */
 
--- 窗口函数（给聚合函数开窗）
+```
 
--- 在order by和limit 之前执行
-/*
- 1. OVER(partition by cli_name)：和聚合函数使用，实现分组聚合
- 2. CURRENT ROW：当前行
- 3. n PRECEDING：往前n行数据
- 4. n FOLLOWING：往后n行数据
- 5. UNBOUNDED：起点，UNBOUNDED PRECEDING 表示从前面的起点，UNBOUNDED FOLLOWING表示到后面的终点
- 6. LAG(col,n,default_val)：往前第n行数据
- 7. LEAD(col,n, default_val)：往后第n行数据
- 8. NTILE(n)：把有序分区中的行分发到指定数据的组中，各个组有编号，编号从1开始，对于每一行，NTILE返回此行所属的组的编号。注意：n必须为int类型
- */
+## 窗口函数
 
-/*
- 需求
-（1）查询在2017年4月份购买过的顾客及总人数
-（2）查询顾客的购买明细及月购买总额
-（3）上述的场景, 将每个顾客的cost按照日期进行累加
-（4）查询每个顾客上次的购买时间
-（5）查询前20%时间的订单信息
- */
+    （给聚合函数开窗）
+    -- 在order by和limit 之前执行
+    /*
+     1. OVER(partition by cli_name)：和聚合函数使用，实现分组聚合
+     2. CURRENT ROW：当前行
+     3. n PRECEDING：往前n行数据
+     4. n FOLLOWING：往后n行数据
+     5. UNBOUNDED：起点，UNBOUNDED PRECEDING 表示从前面的起点，UNBOUNDED FOLLOWING表示到后面的终点
+     6. LAG(col,n,default_val)：往前第n行数据
+     7. LEAD(col,n, default_val)：往后第n行数据
+     8. NTILE(n)：把有序分区中的行分发到指定数据的组中，各个组有编号，编号从1开始，对于每一行，NTILE返回此行所属的组的编号。注意：n必须为int类型
+     */
 
+### 窗口函数小练习
+
+- [查询在2017年4月份购买过的顾客及总人数](#查询在2017年4月份购买过的顾客及总人数)
+- [查询顾客的购买明细及月购买总额](#查询顾客的购买明细及月购买总额)
+- [上述的场景, 将每个顾客的cost按照日期进行累加](#将每个顾客的cost按照日期进行累加)
+- [查询每个顾客上次的购买时间](#查询每个顾客上次的购买时间)
+- [查询前20%时间的订单信息](#查询前20%时间的订单信息)
+
+```sql
 -- 建表
 CREATE TABLE business
 (
-    name      string COMMENT '姓名',
-    orderdate string COMMENT '购买日期',
-    cost      int COMMENT '花费金额'
+    name STRING COMMENT '姓名',
+    orderdate STRING COMMENT '购买日期',
+    cost int COMMENT '花费金额'
 ) ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
 /*
 +----------------+---------------------+----------------+--+
@@ -1177,10 +1358,14 @@ CREATE TABLE business
 | mart           | 2017-04-13          | 94             |
 +----------------+---------------------+----------------+--+
 */
--- （1）查询在2017年4月份购买过的顾客及总人数
-SELECT name, count(*) OVER ()
+```
+
+#### 查询在2017年4月份购买过的顾客及总人数
+
+```sql
+SELECT name, COUNT(*) OVER ()
 FROM business
-WHERE substring(orderdate, 1, 7) = '2017-04'
+WHERE SUBSTRING(orderdate, 1, 7) = '2017-04'
 GROUP BY name;
 /*
 +-------+-----------------+--+
@@ -1191,10 +1376,10 @@ GROUP BY name;
 +-------+-----------------+--+
 */
 
-SELECT date_format(orderdate, 'yyyy-MM') order_date, name, count(*) OVER () order_count
+SELECT DATE_FORMAT(orderdate, 'yyyy-MM') order_date, name, COUNT(*) OVER () order_count
 FROM business
-WHERE date_format(orderdate, 'yyyy-MM') = '2017-04'
-GROUP BY name, date_format(orderdate, 'yyyy-MM');
+WHERE DATE_FORMAT(orderdate, 'yyyy-MM') = '2017-04'
+GROUP BY name, DATE_FORMAT(orderdate, 'yyyy-MM');
 /*
 +-------------+-------+--------------+--+
 | order_date  | name  | order_count  |
@@ -1203,8 +1388,12 @@ GROUP BY name, date_format(orderdate, 'yyyy-MM');
 | 2017-04     | mart  | 2            |
 +-------------+-------+--------------+--+
 */
--- （2）查询顾客的购买明细及月购买总额
-SELECT name, orderdate, cost, sum(cost) OVER (PARTITION BY month(orderdate))
+```
+
+#### 查询顾客的购买明细及月购买总额
+
+```sql
+SELECT name, orderdate, cost, SUM(cost) OVER (PARTITION BY MONTH(orderdate))
 FROM business;
 /*
 +-------+-------------+-------+---------------+--+
@@ -1226,30 +1415,34 @@ FROM business;
 | neil  | 2017-06-12  | 80    | 80            |
 +-------+-------------+-------+---------------+--+
 */
+```
 
--- 3）上述的场景, 将每个顾客的cost按照日期进行累加
+#### 将每个顾客的cost按照日期进行累加
+
+```sql
 /*
  over() 的使用
  */
 SELECT name,
        orderdate,
        cost,
-       sum(cost) OVER () AS sample1,--所有行相加
-       sum(cost) OVER (PARTITION BY name) AS sample2,--按name分组，组内数据相加
-       sum(cost) OVER (PARTITION BY name ORDER BY orderdate) AS sample3,--按name分组，组内数据累加
+       SUM(cost) OVER () AS sample1,
+       - -所有行相加
+                            sum(cost) OVER (PARTITION BY NAME) AS sample2,--按name分组，组内数据相加
+       sum(cost) OVER (PARTITION BY NAME ORDER BY orderdate) AS sample3,--按name分组，组内数据累加
        sum(cost)
-           OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW ) AS sample4,--和sample3一样,由起点到当前行的聚合
+           OVER (PARTITION BY NAME ORDER BY orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW ) AS sample4,--和sample3一样,由起点到当前行的聚合
        sum(cost)
-           OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS sample5, --当前行和前面一行做聚合
-       sum(cost) OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING ) AS sample6,--当前行和前边一行及后面一行
+           OVER (PARTITION BY NAME ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS sample5, --当前行和前面一行做聚合
+       sum(cost) OVER (PARTITION BY NAME ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING ) AS sample6,--当前行和前边一行及后面一行
        sum(cost)
-           OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING ) AS sample7 --当前行及后面所有行
+           OVER (PARTITION BY NAME ORDER BY orderdate ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING ) AS sample7 --当前行及后面所有行
 FROM business;
 -- sample1 所有行相加
 SELECT name,
        orderdate,
        cost,
-       sum(cost) OVER () AS sample1
+       SUM(cost) OVER () AS sample1
 FROM business;
 /*
 +-------+-------------+-------+----------+--+
@@ -1276,8 +1469,8 @@ FROM business;
 SELECT name,
        orderdate,
        cost,
-       sum(cost) OVER () AS sample1,
-       sum(cost) OVER (PARTITION BY name) AS sample2
+       SUM(cost) OVER ()                  AS sample1,
+       SUM(cost) OVER (PARTITION BY name) AS sample2
 FROM business;
 /*
 +-------+-------------+-------+----------+----------+--+
@@ -1304,9 +1497,9 @@ FROM business;
 SELECT name,
        orderdate,
        cost,
-       sum(cost) OVER () AS sample1,
-       sum(cost) OVER (PARTITION BY name) AS sample2,
-       sum(cost) OVER (PARTITION BY name ORDER BY orderdate) AS sample3
+       SUM(cost) OVER ()                                     AS sample1,
+       SUM(cost) OVER (PARTITION BY name)                    AS sample2,
+       SUM(cost) OVER (PARTITION BY name ORDER BY orderdate) AS sample3
 FROM business;
 /*
 +-------+-------------+-------+----------+----------+----------+--+
@@ -1333,10 +1526,10 @@ FROM business;
 SELECT name,
        orderdate,
        cost,
-       sum(cost) OVER () AS sample1,
-       sum(cost) OVER (PARTITION BY name) AS sample2,
-       sum(cost) OVER (PARTITION BY name ORDER BY orderdate) AS sample3,
-       sum(cost)
+       SUM(cost) OVER ()                                                                                AS sample1,
+       SUM(cost) OVER (PARTITION BY name)                                                               AS sample2,
+       SUM(cost) OVER (PARTITION BY name ORDER BY orderdate)                                            AS sample3,
+       SUM(cost)
            OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS sample4
 FROM business;
 /*
@@ -1363,10 +1556,10 @@ FROM business;
 SELECT name,
        orderdate,
        cost,
-       sum(cost)
+       SUM(cost)
            OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS sample4,
-       sum(cost)
-           OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS sample5
+       SUM(cost)
+           OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)         AS sample5
 FROM business;
 /*
 +-------+-------------+-------+----------+----------+--+
@@ -1392,9 +1585,9 @@ FROM business;
 SELECT name,
        orderdate,
        cost,
-       sum(cost)
-           OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS sample5,
-       sum(cost) OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING ) AS sample6
+       SUM(cost)
+           OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)        AS sample5,
+       SUM(cost) OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING ) AS sample6
 FROM business;
 /*
 +-------+-------------+-------+----------+----------+--+
@@ -1420,10 +1613,10 @@ FROM business;
 SELECT name,
        orderdate,
        cost,
-       sum(cost)
-           OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS sample5,
-       sum(cost) OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING ) AS sample6,
-       sum(cost)
+       SUM(cost)
+           OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)          AS sample5,
+       SUM(cost) OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING )   AS sample6,
+       SUM(cost)
            OVER (PARTITION BY name ORDER BY orderdate ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING ) AS sample7
 FROM business;
 /*
@@ -1446,16 +1639,19 @@ FROM business;
 | tony  | 2017-01-07  | 50    | 79       | 79       | 50       |
 +-------+-------------+-------+----------+----------+----------+--+
 */
+```
 
--- （4）查询每个顾客上次的购买时间
+#### 查询每个顾客上次的购买时间
+
+```sql
 /*
  log(col, num,default)往前num行的数据，不存在时默认为default，不设置默认值，不存在时用null补齐
  */
 SELECT name,
        orderdate,
        cost,
-       lag(orderdate, 1, '未购买过') OVER (PARTITION BY name ORDER BY orderdate ) AS time1,
-       lag(orderdate, 2) OVER (PARTITION BY name ORDER BY orderdate) AS time2
+       LAG(orderdate, 1, '未购买过') OVER (PARTITION BY name ORDER BY orderdate ) AS time1,
+       LAG(orderdate, 2) OVER (PARTITION BY name ORDER BY orderdate)          AS time2
 FROM business;
 /*
 +-------+-------------+-------+-------------+-------------+--+
@@ -1478,8 +1674,11 @@ FROM business;
 +-------+-------------+-------+-------------+-------------+--+
 14 rows selected (17.271 seconds)
 */
+```
 
--- （5）查询前20%时间的订单信息
+#### 查询前20%时间的订单信息
+
+```sql
 /*
  NTILE(n)：把有序分区中的行分发到指定数据的组中，各个组有编号，编号从1开始，对于每一行，NTILE返回此行所属的组的编号。注意：n必须为int类型
  ntile(n)和where sorter = m 构成 n/m，如：ntile（2）和where sorted = 1 构成显示所有列的1/2
@@ -1487,7 +1686,7 @@ FROM business;
  */
 SELECT *
 FROM (
-         SELECT name, orderdate, cost, ntile(5) OVER (ORDER BY orderdate) sorted
+         SELECT name, orderdate, cost, NTILE(5) OVER (ORDER BY orderdate) sorted
          FROM business
      ) t
 WHERE sorted = 1;
@@ -1502,6 +1701,7 @@ WHERE sorted = 1;
 3 rows selected (8.716 seconds)
 */
 
+
 -- rank函数
 /*
  函数说明：
@@ -1512,18 +1712,17 @@ WHERE sorted = 1;
 -- 建表，加载数据
 CREATE TABLE score
 (
-    name    string COMMENT '姓名',
-    subject string COMMENT '学科',
-    score   int COMMENT '分数'
-)
-    ROW FORMAT DELIMITED FIELDS TERMINATED BY "\t";
+    name STRING COMMENT '姓名',
+    subject STRING COMMENT '学科',
+    score int COMMENT '分数'
+) ROW FORMAT DELIMITED FIELDS TERMINATED BY "\t";
 LOAD DATA LOCAL INPATH '/data/hive/score.txt' INTO TABLE score;
 -- 需求：计算每门学科成绩排名。
 -- rank（） 排序相同时会重复，总数不变，按照学科分组，组内按照分数降序排列
 SELECT name,
        subject,
        score,
-       rank() OVER (PARTITION BY subject ORDER BY score DESC) rp
+       RANK() OVER (PARTITION BY subject ORDER BY score DESC) rp
 FROM score;
 /*
 +-------+----------+--------+-----+--+
@@ -1549,9 +1748,10 @@ FROM score;
 SELECT name,
        subject,
        score,
-       rank() OVER (PARTITION BY subject ORDER BY score DESC) rp,
-       dense_rank() OVER (PARTITION BY subject ORDER BY score DESC) drp
+       RANK() OVER (PARTITION BY subject ORDER BY score DESC)       rp,
+       DENSE_RANK() OVER (PARTITION BY subject ORDER BY score DESC) drp
 FROM score;
+
 /*
 +-------+----------+--------+-----+------+--+
 | name  | subject  | score  | rp  | drp  |
@@ -1574,9 +1774,9 @@ FROM score;
 SELECT name,
        subject,
        score,
-       rank() OVER (PARTITION BY subject ORDER BY score DESC) rp,
-       dense_rank() OVER (PARTITION BY subject ORDER BY score DESC) drp,
-       row_number() OVER (PARTITION BY subject ORDER BY score DESC) rmp
+       RANK() OVER (PARTITION BY subject ORDER BY score DESC)       rp,
+       DENSE_RANK() OVER (PARTITION BY subject ORDER BY score DESC) drp,
+       ROW_NUMBER() OVER (PARTITION BY subject ORDER BY score DESC) rmp
 FROM score;
 /*
 +-------+----------+--------+-----+------+------+--+
@@ -1600,5 +1800,129 @@ FROM score;
 */
 ```
 
+#### 计算3日留存率
+```sql
+INSERT INTO dwt_uv_topic
+VALUES ('2020-06-14', '2020-06-15'),
+       ('2020-06-14', '2020-06-15'),
+       ('2020-06-14', '2020-06-15'),
+       ('2020-06-14', '2020-06-16'),
+       ('2020-06-14', '2020-06-16'),
+       ('2020-06-14', '2020-06-16'),
+       ('2020-06-14', '2020-06-16'),
+       ('2020-06-14', '2020-06-17'),
+       ('2020-06-14', '2020-06-17'),
+       ('2020-06-14', '2020-06-17'),
+
+       ('2020-06-15', '2020-06-15'),
+       ('2020-06-15', '2020-06-15'),
+       ('2020-06-15', '2020-06-15'),
+       ('2020-06-15', '2020-06-16'),
+       ('2020-06-15', '2020-06-16'),
+       ('2020-06-15', '2020-06-16'),
+       ('2020-06-15', '2020-06-16'),
+       ('2020-06-15', '2020-06-17'),
+       ('2020-06-15', '2020-06-17'),
+       ('2020-06-15', '2020-06-17'),
+       ('2020-06-15', '2020-06-15'),
+       ('2020-06-15', '2020-06-15'),
+       ('2020-06-15', '2020-06-15'),
+       ('2020-06-15', '2020-06-16'),
+       ('2020-06-15', '2020-06-16'),
+       ('2020-06-15', '2020-06-16'),
+       ('2020-06-15', '2020-06-16'),
+       ('2020-06-15', '2020-06-17'),
+       ('2020-06-15', '2020-06-17'),
+       ('2020-06-15', '2020-06-17'),
+
+       ('2020-06-16', '2020-06-17'),
+       ('2020-06-16', '2020-06-17'),
+       ('2020-06-16', '2020-06-17'),
+       ('2020-06-16', '2020-06-17'),
+       ('2020-06-16', '2020-06-16'),
+       ('2020-06-16', '2020-06-16'),
+       ('2020-06-16', '2020-06-16'),
+       ('2020-06-16', '2020-06-17'),
+       ('2020-06-16', '2020-06-17'),
+       ('2020-06-16', '2020-06-17');
+
+INSERT INTO ads_user_retention_day_rate
+SELECT '2020-06-17'                             AS              stat_date,
+       login_date_first                         AS              create_date,
+       DATEDIFF('2020-06-17', login_date_first) AS              retention_day,
+       SUM(IF(login_date_last = '2020-06-17', 1, 0))            retention_count,
+       COUNT(*)                                                 new_mid_count,
+       SUM(IF(login_date_last = '2020-06-17', 1, 0)) / COUNT(*) retention_ratio
+FROM dwt_uv_topic
+WHERE login_date_first IN (DATE_ADD('2020-06-17', -1), DATE_ADD('2020-06-17', -2), DATE_ADD('2020-06-17', -3))
+GROUP BY login_date_first;
+```
+
+#### 7天连续3天活跃
+```sql
+CREATE TABLE dws_uv_detail_daycount
+(
+    mid_id INT,
+    dt     STRING
+);
+
+INSERT INTO dws_uv_detail_daycount
+VALUES (6, '2021-05-02'), -- 间断性连续3天活跃
+       (6, '2021-05-03'),
+       (6, '2021-05-04'),
+       (6, '2021-05-06'),
+       (6, '2021-05-07'),
+       (6, '2021-05-08'),
+
+       (5, '2021-05-03'), -- 连续活跃6天
+       (5, '2021-05-04'),
+       (5, '2021-05-05'),
+       (5, '2021-05-06'),
+       (5, '2021-05-07'),
+       (5, '2021-05-08'),
 
 
+       (1, '2021-05-02'), -- 连续5天活跃
+       (1, '2021-05-03'),
+       (1, '2021-05-04'),
+       (1, '2021-05-05'),
+       (1, '2021-05-06'),
+
+       (2, '2021-05-03'), -- 连续3天活跃
+       (2, '2021-05-05'),
+       (2, '2021-05-06'),
+       (2, '2021-05-07'),
+
+       (3, '2021-05-03'), -- 连续3天活跃
+       (3, '2021-05-04'),
+       (3, '2021-05-05'),
+
+       (4, '2021-05-03'), -- 连续2天活跃
+       (4, '2021-05-05'),
+       (4, '2021-05-07'),
+       (4, '2021-05-08');
+
+
+SELECT '2021-05-08'                                          stat_date,
+       CONCAT(DATE_ADD('2021-05-08', -6), '_', '2021-05-08') wk_dt,
+       COUNT(*)                                              cnt
+FROM (
+         (
+                  SELECT mid_id
+                  FROM (
+                           SELECT mid_id,
+                                  DATE_SUB(dt, rank) date_dif
+                           FROM ( -- 最近7天活跃的用户，并给多次活跃的用户打上标记
+                                    SELECT mid_id,
+                                           dt,
+                                           RANK() OVER (PARTITION BY mid_id ORDER BY dt) rank
+                                    FROM dws_uv_detail_daycount
+                                    WHERE dt >= DATE_ADD('2021-05-08', -6)
+                                      AND dt <= '2021-05-08'
+                                ) t1
+                       ) t2
+                  GROUP BY mid_id, date_dif
+                  HAVING COUNT(*) >= 3
+              ) t3
+     ) t4;
+```
