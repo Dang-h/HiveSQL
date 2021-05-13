@@ -6,6 +6,7 @@ HiveSQL入门，了解一下？😉
 
 - [HQL小练习](https://github.com/Dang-h/BigData/blob/master/Hive/Hive.md)
 - [一些设置](#一些设置)
+- [常用函数](https://github.com/Dang-h/Review/blob/master/hive_review/HiveSQL/%E5%B8%B8%E7%94%A8%E5%87%BD%E6%95%B0.md)
     - [Hive显示中文备注](#Hive显示中文备注)
     - [Hive优化](#Hive优化)
         - [设置reduce个数](#设置reduce个数)
